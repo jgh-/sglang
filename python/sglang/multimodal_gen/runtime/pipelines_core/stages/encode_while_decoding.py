@@ -25,6 +25,16 @@ logger = init_logger(__name__)
 _STREAMED_VIDEO_QUEUE_BYTES = 256 * 1024 * 1024
 
 
+def wants_frame_callback(batch: Req) -> bool:
+    """Whether the caller asked for frames as the decode produces them.
+
+    This is deliberately independent of whether a file is also written: a caller
+    that wants the frames (to encode them elsewhere, to inspect them, to stream
+    them) can ask for them without also asking for an MP4.
+    """
+    return (getattr(batch, "extra", None) or {}).get("frame_callback") is not None
+
+
 def can_encode_while_decoding(
     batch: Req, server_args: ServerArgs, batch_size: int
 ) -> bool:
@@ -75,10 +85,18 @@ class EncodeWhileDecoding:
         self._audio_sample_rate = audio_sample_rate
         self._encoder = None
         self._failed = False
+        # A callback-only request writes no file, so ``finish`` must not claim one.
+        self._writes_file = save_file_path is not None
 
     def __call__(self, frames: torch.Tensor) -> None:
         """Encode frames that are [1, 3, t, H, W] in [0, 1] after ``finish_frames``."""
-        if self._failed:
+        callback = (getattr(self._batch, "extra", None) or {}).get("frame_callback")
+        if callback is not None:
+            # Hand the caller the frames as decoded. The callback owns them for
+            # the duration of the call only; it must copy anything it keeps.
+            callback(frames)
+        if not self._writes_file or self._failed:
+            # Callback-only request: nothing is written, so no encoder is opened.
             return
         try:
             # Untiled decoders can hand over an entire clip. Bound FP32
@@ -122,6 +140,11 @@ class EncodeWhileDecoding:
 
     def finish(self) -> list[str] | None:
         """The saved path, or None when the worker has to save the frames instead."""
+        if not self._writes_file:
+            # Callback-only request: no file was wanted. None means "frames, not
+            # files", so the pipeline runs post_decoding instead of counting a
+            # path against the request.
+            return None
         if self._failed or self._encoder is None:
             return None
         try:

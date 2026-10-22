@@ -34,6 +34,7 @@ from sglang.multimodal_gen.runtime.pipelines_core.stages.base import (
 from sglang.multimodal_gen.runtime.pipelines_core.stages.encode_while_decoding import (
     EncodeWhileDecoding,
     streamed_video_output_path,
+    wants_frame_callback,
 )
 from sglang.multimodal_gen.runtime.pipelines_core.stages.validators import (
     VerificationResult,
@@ -368,19 +369,30 @@ class DecodingStage(PipelineStage):
         self, batch: Req, server_args: ServerArgs
     ) -> EncodeWhileDecoding | None:
         """An encoder to feed during the decode, if the frames go to the file as decoded."""
-        if (
+        overrides_decode = (
             type(self).forward is not DecodingStage.forward
             or type(self).decode is not DecodingStage.decode
+        )
+        if (
+            overrides_decode
             or not isinstance(self.vae, ParallelTiledVAE)
             or not self.vae.supports_decode_on_frames
             or batch.return_trajectory_decoded
             or not isinstance(batch.latents, torch.Tensor)
         ):
+            if wants_frame_callback(batch):
+                # Say so: a custom decoding stage decodes itself, so a registered
+                # callback would otherwise be dropped without a word.
+                logger.warning(
+                    "%s does not stream decoded frames; the frame callback is not "
+                    "called for this model",
+                    type(self).__name__,
+                )
             return None
         save_file_path = streamed_video_output_path(
             batch, server_args, int(batch.latents.shape[0])
         )
-        if save_file_path is None:
+        if save_file_path is None and not wants_frame_callback(batch):
             return None
         return EncodeWhileDecoding(save_file_path, batch)
 

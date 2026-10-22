@@ -21,6 +21,7 @@ from sglang.multimodal_gen.runtime.pipelines_core.stages.encode_while_decoding i
     EncodeWhileDecoding,
     can_encode_while_decoding,
     streamed_video_output_path,
+    wants_frame_callback,
 )
 from sglang.multimodal_gen.runtime.server_args import ServerArgs
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
@@ -176,7 +177,7 @@ class LTX2AVDecodingStage(DecodingStage):
         if audio_first:
             self._decode_audio(batch, server_args, output_batch)
         stream = None
-        if save_path is not None:
+        if save_path is not None or wants_frame_callback(batch):
             # ffmpeg needs the audio input before it can consume the first video frames
             stream = EncodeWhileDecoding(
                 save_path,

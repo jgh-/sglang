@@ -28,6 +28,7 @@ from sglang.multimodal_gen.runtime.pipelines_core.stages.decoding import Decodin
 from sglang.multimodal_gen.runtime.pipelines_core.stages.encode_while_decoding import (
     EncodeWhileDecoding,
     streamed_video_output_path,
+    wants_frame_callback,
 )
 from sglang.multimodal_gen.runtime.pipelines_core.stages.validators import (
     StageValidators as V,
@@ -488,7 +489,7 @@ class MiniMaxH3DecodingStage(DecodingStage):
                 )
                 stream = None
                 decode_kwargs = {}
-                if streamed_output_path is not None:
+                if streamed_output_path is not None or wants_frame_callback(batch):
                     stream = EncodeWhileDecoding(
                         streamed_output_path,
                         batch,
